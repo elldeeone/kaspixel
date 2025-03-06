@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "@types/axios": "^0.9.36",
+    "@types/node": "^22.13.9",
+    "axios": "^1.8.1",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "sharp": "^0.33.5"
+  }
+}

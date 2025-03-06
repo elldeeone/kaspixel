@@ -1,0 +1,191 @@
+You are an expert in Python, gRPC, Protobuf, Postgres, Docker, REST APIs, Async Programming, and Concurrency. 
+
+This document outlines opinionated best practices for building a multi-service Python application with these technologies. It is tailored to help you structure and maintain codebases that include microservices and Dockerised deployments.
+ 
+### Change Log
+After every change is made, add a changelog to the [CHANGELOG.md](./CHANGELOG.md) file.
+
+### Folder Structure
+ 
+A well-organised folder structure is crucial for multi-service development. Below is a sample structure you could adapt:
+ 
+project-root/
+├── docker-compose.yml
+├── .dockerignore
+├── .gitignore
+├── README.md
+├── requirements.txt
+├── services/
+│   ├── service_a/
+│   │   ├── Dockerfile
+│   │   ├── app/
+│   │   │   ├── __init__.py
+│   │   │   ├── main.py
+│   │   │   ├── config.py
+│   │   │   ├── models/
+│   │   │   ├── services/
+│   │   │   └── utils/
+│   │   └── tests/
+│   └── service_b/
+│       ├── Dockerfile
+│       ├── app/
+│       │   ├── __init__.py
+│       │   ├── main.py
+│       │   ├── config.py
+│       └── tests/
+├── docs/
+│   ├── API.md
+│   ├── DATA_MODEL.md
+│   ├── HANDSHAKE.md
+│   └── SCORING_LOGIC.md
+└── scripts/
+    ├── db_migrate.sh
+    └── other_utility_scripts.sh
+```
+
+### Coding Style and Linting
+ 
+To maintain a consistent coding style, the following tools and guidelines are recommended:
+ 
+* **Black**: Use Black as the code formatter to ensure consistent indentation, line length, and spacing.
+* **Pylint**: Use Pylint to enforce coding standards and detect potential issues.
+* **Isort**: Use Isort to sort imports in a consistent manner.
+* **Naming conventions**: Use the PEP 8 style guide for naming conventions, including:
+	+ Class names: `CamelCase`
+	+ Function names: `snake_case`
+	+ Variable names: `snake_case`
+ 
+### Good Programming Principles
+ 
+The following principles should be followed to ensure the application is maintainable, efficient, and readable:
+ 
+* **Separation of Concerns (SoC)**: Keep each module or function focused on a specific task or responsibility.
+* **Don't Repeat Yourself (DRY)**: Avoid duplicating code or logic; instead, extract common functionality into reusable functions or classes.
+* **Keep it Simple, Stupid (KISS)**: Favor simple, straightforward solutions over complex, convoluted ones.
+* **You Ain't Gonna Need It (YAGNI)**: Don't add functionality or features that aren't currently needed.
+* **Single Responsibility Principle (SRP)**: Each module or class should have a single, well-defined responsibility.
+ 
+Example of SoC:
+```python
+# Bad example: mixing concerns
+class User:
+    def __init__(self, name, email):
+        self.name = name
+        self.email = email
+    def save_to_database(self):
+        # database logic here
+        pass
+    def send_email_notification(self):
+        # email logic here
+        pass
+ 
+# Good example: separating concerns
+class User:
+    def __init__(self, name, email):
+        self.name = name
+        self.email = email
+ 
+class UserService:
+    def save_user(self, user):
+        # database logic here
+        pass
+ 
+class EmailService:
+    def send_email_notification(self, user):
+        # email logic here
+        pass
+```
+ 
+### Type Hints and Docstrings
+ 
+Type hints and docstrings are essential for making the code more readable and self-documenting.
+ 
+* Use type hints to specify the expected types of function parameters and return values.
+* Use docstrings to provide a brief description of each function or module.
+ 
+Example:
+```python
+def add_numbers(a: int, b: int) -> int:
+    """
+    Adds two numbers together.
+ 
+    Args:
+        a (int): The first number.
+        b (int): The second number.
+ 
+    Returns:
+        int: The sum of the two numbers.
+    """
+    return a + b
+```
+ 
+### Error Handling and Logging
+ 
+A well-structured error handling and logging system is crucial for debugging and maintaining the application. The following guidelines are recommended:
+ 
+* **Use try-except blocks**: Use try-except blocks to catch and handle exceptions, preventing the application from crashing.
+* **Log errors**: Use a logging framework, such as the `logging` module, to log errors and exceptions.
+* **Provide meaningful error messages**: Provide clear and concise error messages to help with debugging.
+* **Use logging levels**: Use logging levels, such as `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`, to categorize log messages.
+ 
+Example:
+```python
+import logging
+ 
+def divide_numbers(a: int, b: int) -> float:
+    try:
+        result = a / b
+        return result
+    except ZeroDivisionError:
+        logging.error("Cannot divide by zero")
+        raise ValueError("Cannot divide by zero")
+```
+ 
+### Docker & Deployment Practices
+
+When deploying multiple Python services, each typically runs in its own Docker container:
+
+### Dockerfiles
+- Use lightweight base images (`python:3.10-slim`) for smaller footprints
+- Copy only necessary files into each container
+- Install Python dependencies in a single step (caching layers effectively)
+
+### docker-compose.yml
+- Define services (e.g., `service_a`, `service_b`, `db`, `redis`)
+- Map ports only if they must be externally reachable
+- Keep environment-specific configs in `.env` or use Docker secrets for sensitive data (like DB passwords)
+
+### Example Configuration
+```dockerfile
+# Dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY ./app .
+CMD ["python", "main.py"]
+```
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+services:
+  service_a:
+    build: ./services/service_a
+    environment:
+      - DB_HOST=postgres
+    depends_on:
+      - postgres
+  
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+
+
+## documentation
+
+Documentation should be in the `docs` folder and used as a reference for the project.
+

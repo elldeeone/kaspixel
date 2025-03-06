@@ -1,0 +1,18 @@
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Copy package.json and package-lock.json
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Set NODE_ENV to development
+ENV NODE_ENV=development
+
+# Expose the port
+EXPOSE 3000
+
+# Start the development server
+CMD ["npm", "run", "dev"] 
