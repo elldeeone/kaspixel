@@ -1,6 +1,6 @@
 import type React from "react"
 import "./globals.css"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Toaster } from "@/components/ui/toaster"
 import { Rubik, Oswald, Lato } from "next/font/google"
 
@@ -22,6 +22,13 @@ const lato = Lato({
   weight: ["300", "400", "700"],
   variable: "--font-lato",
 })
+
+export const viewport: Viewport = {
+  themeColor: '#70C7BA',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+}
 
 export const metadata: Metadata = {
   title: "KasPixel - Place Your Pixels",
@@ -84,12 +91,6 @@ export const metadata: Metadata = {
     ],
   },
   manifest: '/favicons/site.webmanifest',
-  themeColor: '#70C7BA',
-  viewport: {
-    width: 'device-width',
-    initialScale: 1,
-    maximumScale: 1,
-  },
 }
 
 export default function RootLayout({

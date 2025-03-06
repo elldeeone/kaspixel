@@ -51,30 +51,39 @@ export default function ColorPicker({ selectedColor, onColorChange }: ColorPicke
     const centerX = rect.width / 2
     const centerY = rect.height / 2
 
-    const x = e.clientX - rect.left - centerX
-    const y = e.clientY - rect.top - centerY
+    let x = e.clientX - rect.left - centerX
+    let y = e.clientY - rect.top - centerY
 
-    // Calculate hue from angle
+    // Calculate distance from center
+    const maxRadius = Math.min(centerX, centerY) // Use the smaller dimension to ensure we stay within bounds
+    let distance = Math.sqrt(x * x + y * y)
+    
+    // Ensure we don't exceed the maximum radius
+    // This prevents selecting outside the visible color wheel
+    if (distance > maxRadius) {
+      // If clicked outside the wheel, adjust to the edge of the wheel
+      const ratio = maxRadius / distance
+      x *= ratio
+      y *= ratio
+      distance = maxRadius // Update distance after adjusting x and y
+    }
+
+    // Calculate hue from angle - corrected calculation
+    // Math.atan2 returns angle in radians counter-clockwise from positive x-axis
+    // We need to convert to degrees and adjust to start from the top (red at 0°)
     const angle = Math.atan2(y, x)
-    const hue = ((angle * 180) / Math.PI + 360) % 360
+    // Convert to degrees and adjust to make red at top (0°)
+    // Adding 90° to rotate the starting point, then normalize to 0-360
+    const hue = ((angle * 180) / Math.PI + 90 + 360) % 360
+    
+    // Normalize distance to 0-1 range, invert it, and clamp it
+    const saturation = Math.min(100, Math.max(0, 100 - (distance / maxRadius) * 100))
 
-    // Calculate saturation from distance
-    const distance = Math.min(1, Math.sqrt(x * x + y * y) / centerX)
-    const saturation = distance * 100
-
-    // Fixed lightness for simplicity
+    // Fixed lightness at 50%
     const lightness = 50
 
     // Convert HSL to hex
     setCurrentColor(hslToHex(hue, saturation, lightness))
-  }
-
-  // Handle lightness slider
-  const handleLightnessChange = (value: number[]) => {
-    // Extract current HSL from the color
-    const hsl = hexToHsl(currentColor)
-    // Update only the lightness
-    setCurrentColor(hslToHex(hsl.h, hsl.s, value[0]))
   }
 
   // Handle hex input change
@@ -157,8 +166,11 @@ export default function ColorPicker({ selectedColor, onColorChange }: ColorPicke
                 <div
                   className="absolute w-4 h-4 rounded-full border-2 border-white transform -translate-x-1/2 -translate-y-1/2 pointer-events-none z-30"
                   style={{
-                    left: `${50 + Math.cos((hsl.h * Math.PI) / 180) * (hsl.s / 100) * 50}%`,
-                    top: `${50 + Math.sin((hsl.h * Math.PI) / 180) * (hsl.s / 100) * 50}%`,
+                    // Adjust the position calculation to match the visual representation
+                    // The center has 100% saturation, edges have 0% saturation
+                    // So we need to use the inverted saturation value for positioning
+                    left: `${50 + Math.cos(((hsl.h - 90) * Math.PI) / 180) * ((100 - hsl.s) / 100) * 50}%`,
+                    top: `${50 + Math.sin(((hsl.h - 90) * Math.PI) / 180) * ((100 - hsl.s) / 100) * 50}%`,
                     backgroundColor: currentColor,
                     boxShadow: "0 0 0 1px rgba(0,0,0,0.3)",
                   }}
@@ -166,24 +178,8 @@ export default function ColorPicker({ selectedColor, onColorChange }: ColorPicke
               </div>
             </div>
 
-            {/* Lightness slider */}
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <label className="text-sm font-medium">Lightness</label>
-                <span className="text-sm">{hsl.l}%</span>
-              </div>
-              <Slider
-                value={[hsl.l]}
-                min={0}
-                max={100}
-                step={1}
-                onValueChange={handleLightnessChange}
-                className="w-full"
-              />
-            </div>
-
             {/* Hex input */}
-            <div className="flex gap-2 items-center">
+            <div className="flex gap-2 items-center mt-4">
               <Input value={currentColor} onChange={handleHexChange} className="flex-1" maxLength={7} />
               <div
                 className="w-8 h-8 rounded-md border"
