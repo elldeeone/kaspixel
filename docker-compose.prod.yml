@@ -1,0 +1,52 @@
+services:
+  frontend:
+    container_name: frontend
+    image: elldee/kaspixel-frontend:v1.0.0
+    ports:
+      - "0.0.0.0:3003:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=/api/v1
+      - NEXT_PUBLIC_WS_URL=/ws
+      - NEXT_PUBLIC_KASPA_URL=${NEXT_PUBLIC_KASPA_URL}
+      - NEXT_PUBLIC_DEFAULT_CANVAS_WIDTH=${CANVAS_WIDTH}
+      - NEXT_PUBLIC_DEFAULT_CANVAS_HEIGHT=${CANVAS_HEIGHT}
+      - NEXT_PUBLIC_PIXEL_PACK_SIZE=${PIXEL_PACK_SIZE}
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  backend:
+    container_name: backend
+    image: elldee/kaspixel-backend:v1.0.0
+    ports:
+      - "0.0.0.0:8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - KASPA_API_URL=${NEXT_PUBLIC_KASPA_URL}
+      - RECEIVER_ADDRESS=${RECEIVER_ADDRESS}
+      - CANVAS_WIDTH=${CANVAS_WIDTH}
+      - CANVAS_HEIGHT=${CANVAS_HEIGHT}
+      - ENABLE_TRANSACTION_VERIFICATION=${VERIFY_TRANSACTIONS}
+      - TRANSACTION_CHECK_INTERVAL=${TRANSACTION_CHECK_INTERVAL}
+      - PIXEL_PACK_COST=${PIXEL_PACK_COST}
+      - PIXEL_PACK_SIZE=${PIXEL_PACK_SIZE}
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  db:
+    container_name: db
+    image: postgres:14-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=kaspixel
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data: 

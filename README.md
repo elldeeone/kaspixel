@@ -1,5 +1,9 @@
 # KasPixel
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/f2d0ca44-b65c-4963-bf70-013eeadc4de7" alt="KasPixel Logo">
+</p>
+
 A real-time collaborative pixel art platform powered by Kaspa cryptocurrency. Users can place pixels on a 1000x1000 canvas, with each pixel placement requiring a payment through the KasWare Wallet integration.
 
 ## Features
@@ -100,9 +104,15 @@ cp .env.example .env
 
 4. Start the application:
 
-### Production Mode
+### Production Mode with Local Build
 ```bash
 docker-compose up -d
+```
+
+### Production Mode with Pre-built Images
+```bash
+# Use pre-built images from DockerHub
+docker-compose -f docker-compose.prod.yml up -d
 ```
 
 ### Development Mode
@@ -117,14 +127,21 @@ docker-compose -f docker-compose.dev.yml up -d
 
 ## Docker Configuration
 
-The project includes two Docker Compose configurations:
+The project includes three Docker Compose configurations:
 
-### Production (docker-compose.yml)
+### Production with Local Build (docker-compose.yml)
+- Builds the images locally from source code
 - Optimized for production use
 - Builds the Next.js application during Docker image creation
 - No volume mounts for the frontend to preserve build artifacts
 - Uses `npm run start` to serve the optimized build
 - Configured for performance and reliability
+
+### Production with Pre-built Images (docker-compose.prod.yml)
+- Uses pre-built images from DockerHub (elldee/kaspixel-frontend:v1.0.0 and elldee/kaspixel-backend:v1.0.0)
+- No local building required - faster startup
+- Ideal for deployment or when you don't need to modify the code
+- Includes restart policies for better reliability
 
 ### Development (docker-compose.dev.yml)
 - Configured for development with hot reloading
