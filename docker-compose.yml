@@ -23,11 +23,11 @@ services:
       context: ./services/backend
       dockerfile: Dockerfile
     ports:
-      - "0.0.0.0:8000:8000"
+      - "0.0.0.0:8002:8000"
     volumes:
       - ./services/backend:/app
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/kaspixel
       - KASPA_API_URL=${NEXT_PUBLIC_KASPA_URL}
       - RECEIVER_ADDRESS=${RECEIVER_ADDRESS}
       - CANVAS_WIDTH=${CANVAS_WIDTH}
@@ -43,7 +43,7 @@ services:
     container_name: db
     image: postgres:14-alpine
     ports:
-      - "5432:5432"
+      - "5433:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres

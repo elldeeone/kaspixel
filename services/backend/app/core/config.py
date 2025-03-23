@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     
     # Kaspa Network Settings
     # Using the consolidated environment variable that's shared with frontend
-    KASPA_API_URL: str = os.getenv("NEXT_PUBLIC_KASPA_URL", "http://de4.kaspa.org:8000")
+    KASPA_API_URL: str = os.getenv("NEXT_PUBLIC_KASPA_URL", "https://api.kaspa.org")
     
     # Payment Settings
     RECEIVER_ADDRESS: str = os.getenv("RECEIVER_ADDRESS", "")  # Default empty, must be set in .env

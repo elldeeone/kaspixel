@@ -4,15 +4,16 @@ from typing import List, Optional, Dict, Any
 import traceback
 import asyncio
 from sqlalchemy import func
+import json
 
-from app.db.session import get_db
-from app.models.pixel import Pixel
-from app.models.wallet_balance import WalletBalance
-from app.models.transaction import Transaction
-from app.services.kasware import kasware_service, KasWareService
-from app.websockets import manager as connection_manager  # Import the shared manager instance
 from app.core.config import settings, Settings
+from app.db.session import get_db, SessionLocal
+from app.models.pixel import Pixel
+from app.models.transaction import Transaction
+from app.models.wallet_balance import WalletBalance
+from app.services.kasware import kasware_service, KasWareService
 from app.schemas import TransactionVerification, TransactionMetrics
+from app.websockets import manager as connection_manager
 
 router = APIRouter()
 # connection_manager = ConnectionManager()  # Remove this line as we're importing the manager from main.py
@@ -57,13 +58,26 @@ async def verify_transaction_in_background(transaction_id: str):
     # If not verified, we'll let the frontend poll for updates
     return verification_result
 
-async def verify_transaction_and_update_balance(transaction_id: str, db: Session):
+async def verify_transaction_and_update_balance(transaction_id: str, db: Session = None):
     """
     Verify a transaction and update the wallet balance if valid.
     This function is used for purchase transactions to ensure pixels are only
     added to a wallet's balance after the transaction is confirmed on the blockchain.
+    
+    Note: This function creates its own database session if one is not provided,
+    which is important for background tasks that run after the request is completed.
     """
+    print(f"=======================================")
     print(f"Starting verification and balance update for transaction {transaction_id}")
+    
+    # Create a new database session if one wasn't provided
+    if db is None:
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        print(f"Created new database session for background verification")
+        own_session = True
+    else:
+        own_session = False
     
     try:
         # Get the transaction from the database
@@ -73,11 +87,19 @@ async def verify_transaction_and_update_balance(transaction_id: str, db: Session
         
         if not transaction:
             print(f"Transaction {transaction_id} not found in database")
+            if own_session:
+                db.close()
+                print(f"Closed database session")
             return
             
         if transaction.verified:
             print(f"Transaction {transaction_id} already verified")
+            if own_session:
+                db.close()
+                print(f"Closed database session")
             return
+        
+        print(f"Found transaction in database: {transaction.transaction_id}, wallet: {transaction.wallet_address}, pixels to add: {transaction.pixels_added}")
         
         # Start monitoring for transaction confirmation
         await kasware_service.start_transaction_timer(transaction_id)
@@ -105,30 +127,69 @@ async def verify_transaction_and_update_balance(transaction_id: str, db: Session
             await asyncio.sleep(0.2)
         
         if verified:
+            print(f"TRANSACTION VERIFIED: {transaction_id} - Now updating wallet balance for {transaction.wallet_address}")
             # Transaction is valid, update the wallet balance
-            wallet_balance = db.query(WalletBalance).filter(
-                WalletBalance.wallet_address == transaction.wallet_address
-            ).first()
-            
-            if not wallet_balance:
-                print(f"Creating new wallet balance for {transaction.wallet_address}")
-                wallet_balance = WalletBalance(
-                    wallet_address=transaction.wallet_address,
-                    pixel_balance=0
-                )
-                db.add(wallet_balance)
-            
-            # Now it's safe to add the pixels
-            old_balance = wallet_balance.pixel_balance
-            wallet_balance.pixel_balance += transaction.pixels_added
-            print(f"Updated wallet balance from {old_balance} to {wallet_balance.pixel_balance} for {transaction.wallet_address}")
-            
-            # Mark transaction as verified
-            transaction.verified = True
-            
-            # Commit changes
-            db.commit()
-            print(f"Transaction {transaction_id} marked as verified and balance updated")
+            try:
+                # Debug: Print all wallet balances in database
+                all_balances = db.query(WalletBalance).all()
+                print(f"All wallet balances before update:")
+                for balance in all_balances:
+                    print(f"  - {balance.wallet_address}: {balance.pixel_balance}")
+                
+                # First, directly check if the wallet exists with a case-sensitive query
+                wallet_balance = db.query(WalletBalance).filter(
+                    WalletBalance.wallet_address == transaction.wallet_address
+                ).first()
+                
+                if not wallet_balance:
+                    print(f"Creating new wallet balance for {transaction.wallet_address}")
+                    # Create the new wallet balance record
+                    wallet_balance = WalletBalance(
+                        wallet_address=transaction.wallet_address,
+                        pixel_balance=0
+                    )
+                    # Add it to the session and immediately flush to get the new ID
+                    db.add(wallet_balance)
+                    db.flush()
+                    print(f"Created new wallet balance with ID: {wallet_balance.id}")
+                    
+                    # Verify it was created correctly
+                    check_wallet = db.query(WalletBalance).filter(
+                        WalletBalance.wallet_address == transaction.wallet_address
+                    ).first()
+                    
+                    if check_wallet:
+                        print(f"Successfully created wallet balance: {check_wallet.wallet_address} with initial balance {check_wallet.pixel_balance}")
+                    else:
+                        print(f"WARNING: Failed to create wallet balance record!")
+                else:
+                    print(f"Found existing wallet balance for {transaction.wallet_address}: {wallet_balance.pixel_balance}")
+                
+                # Now it's safe to add the pixels - we have a wallet_balance record for sure
+                old_balance = wallet_balance.pixel_balance if wallet_balance else 0
+                wallet_balance.pixel_balance += transaction.pixels_added
+                print(f"Updated wallet balance from {old_balance} to {wallet_balance.pixel_balance} for {transaction.wallet_address}")
+                
+                # Mark transaction as verified
+                transaction.verified = True
+                
+                # Commit changes
+                db.commit()
+                print(f"Transaction {transaction_id} marked as verified and balance updated")
+                
+                # Debug: verify changes were committed
+                updated_balance = db.query(WalletBalance).filter(
+                    WalletBalance.wallet_address == transaction.wallet_address
+                ).first()
+                
+                if updated_balance:
+                    print(f"Verified balance after commit: {updated_balance.wallet_address} has {updated_balance.pixel_balance} pixels")
+                else:
+                    print(f"ERROR: Could not find wallet balance after commit")
+            except Exception as e:
+                print(f"ERROR updating wallet balance: {str(e)}")
+                import traceback
+                traceback.print_exc()
         else:
             print(f"Transaction {transaction_id} could not be verified after {max_attempts} attempts")
             
@@ -137,6 +198,13 @@ async def verify_transaction_and_update_balance(transaction_id: str, db: Session
         print(f"Error verifying transaction {transaction_id}: {str(e)}")
         import traceback
         traceback.print_exc()
+    finally:
+        # Close the database session if we created it
+        if own_session:
+            db.close()
+            print(f"Closed database session")
+    
+    print(f"=======================================")
 
 @router.post("/pixels", status_code=status.HTTP_201_CREATED)
 async def place_pixel(
@@ -230,7 +298,8 @@ async def place_pixel(
 async def verify_transaction(
     transaction_id: str,
     kasware_service: KasWareService = Depends(get_kasware_service),
-    settings: Settings = Depends(get_settings)
+    settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_db)
 ):
     """
     Verify a transaction on the Kaspa blockchain.
@@ -242,26 +311,75 @@ async def verify_transaction(
     print(f"Received verification request for transaction ID: {transaction_id}")
     
     # Clean up transaction_id if it's a JSON string
+    original_tx_id = transaction_id
+    clean_tx_id = transaction_id
+    extracted_id = None
+    
     if transaction_id.startswith('{') and transaction_id.endswith('}'):
         try:
             import json
             tx_data = json.loads(transaction_id)
             if 'id' in tx_data:
-                transaction_id = tx_data['id']
-                print(f"Extracted transaction ID from JSON: {transaction_id}")
+                extracted_id = tx_data['id']
+                clean_tx_id = extracted_id
+                print(f"Extracted transaction ID from JSON: {extracted_id}")
         except Exception as e:
             print(f"Error parsing transaction ID as JSON: {e}")
             # Continue with original ID if parsing fails
     
     # Strip any quotes or whitespace
-    transaction_id = transaction_id.strip().strip('"\'')
-    print(f"Cleaned transaction ID: {transaction_id}")
+    clean_tx_id = clean_tx_id.strip().strip('"\'')
+    print(f"Cleaned transaction ID: {clean_tx_id}")
     
-    # Verify the transaction
-    result = await kasware_service.verify_transaction_in_blockchain(transaction_id)
-    print(f"Verification result: {result}")
+    # Check if we have already processed this transaction
+    existing_tx = db.query(Transaction).filter(
+        Transaction.transaction_id == original_tx_id
+    ).first()
     
-    return result
+    if existing_tx is None and extracted_id:
+        # Try with the extracted ID if the original wasn't found
+        existing_tx = db.query(Transaction).filter(
+            Transaction.transaction_id == extracted_id
+        ).first()
+    
+    # If transaction exists and is verified, return that status
+    if existing_tx and existing_tx.verified:
+        print(f"Transaction {clean_tx_id} already verified in database")
+        return {
+            "verified": True,
+            "confirmation_time": 0.1,  # Placeholder value since it's already verified
+            "message": "Transaction already verified",
+            "transaction_recorded": True
+        }
+    
+    # Try to verify through the blockchain API
+    try:
+        # Verify the transaction
+        result = await kasware_service.verify_transaction_in_blockchain(clean_tx_id)
+        print(f"Verification result: {result}")
+        
+        # If verified, update the database record
+        if result.get("verified", False) and existing_tx and not existing_tx.verified:
+            existing_tx.verified = True
+            db.commit()
+            print(f"Updated transaction {clean_tx_id} to verified in database")
+        
+        # Add transaction_recorded flag to response
+        if existing_tx:
+            result["transaction_recorded"] = True
+        
+        return result
+    except Exception as e:
+        print(f"Error during transaction verification: {e}")
+        
+        # Return a user-friendly error with transaction_recorded flag 
+        # if we have it in the database
+        return {
+            "verified": False,
+            "error": str(e),
+            "message": "Error verifying transaction. Your transaction has been recorded and will be verified when the API is available.",
+            "transaction_recorded": existing_tx is not None
+        }
 
 @router.get("/transactions/metrics", response_model=TransactionMetrics)
 async def get_transaction_metrics(
@@ -338,7 +456,7 @@ async def debug_blocks():
         
         # Get the current tip hash
         async with httpx.AsyncClient() as client:
-            tip_response = await client.get(f"http://de4.kaspa.org:8000/info/blockdag")
+            tip_response = await client.get(f"https://api.kaspa.org/info/blockdag")
             if tip_response.status_code != 200:
                 return {"error": f"Failed to get tip hash: {tip_response.status_code}"}
             
@@ -346,7 +464,7 @@ async def debug_blocks():
             
             # Get blocks
             blocks_response = await client.get(
-                f"http://de4.kaspa.org:8000/blocks",
+                f"https://api.kaspa.org/blocks",
                 params={"lowHash": tip_hash, "includeBlocks": "true"}
             )
             
@@ -425,7 +543,7 @@ async def purchase_pixels(
             else:
                 # If transaction exists but is not verified, return pending status
                 # but still start verification in the background
-                background_tasks.add_task(verify_transaction_and_update_balance, transaction_id, db)
+                background_tasks.add_task(verify_transaction_and_update_balance, transaction_id, None)
                 
                 return {
                     "message": "Transaction pending verification",
@@ -465,7 +583,7 @@ async def purchase_pixels(
         
         # Start transaction verification in the background
         if settings.enable_transaction_verification:
-            background_tasks.add_task(verify_transaction_and_update_balance, transaction_id, db)
+            background_tasks.add_task(verify_transaction_and_update_balance, transaction_id, None)
             print(f"Started background verification for {transaction_id}")
         
         # Get current wallet balance (without adding pixels yet)
@@ -496,14 +614,20 @@ async def get_wallet_balance(
 ):
     """
     Get the pixel balance for a wallet.
+    This endpoint will also perform a quick verification to ensure
+    the wallet balance matches the verified transactions.
     """
     print(f"Received balance request for wallet: '{wallet_address}'")
     
-    # Log all wallet balances for debugging
-    all_balances = db.query(WalletBalance).all()
-    print(f"All wallet balances in database:")
-    for balance in all_balances:
-        print(f"  - {balance.wallet_address}: {balance.pixel_balance}")
+    # Check for any verified transactions that might need to be reflected in the balance
+    verified_transactions = db.query(Transaction).filter(
+        Transaction.wallet_address == wallet_address,
+        Transaction.verified == True
+    ).all()
+    
+    # Calculate total pixels from verified transactions
+    total_pixels = sum(tx.pixels_added for tx in verified_transactions) if verified_transactions else 0
+    print(f"Found {len(verified_transactions)} verified transactions with a total of {total_pixels} pixels")
     
     # Try to find the exact match first
     wallet_balance = db.query(WalletBalance).filter(
@@ -521,8 +645,84 @@ async def get_wallet_balance(
         if wallet_balance:
             print(f"Found wallet balance with case-insensitive match: '{wallet_balance.wallet_address}' with {wallet_balance.pixel_balance} pixels")
         else:
-            print(f"No wallet balance found for '{wallet_address}' even with case-insensitive search")
-            return {"pixel_balance": 0}
+            print(f"No wallet balance found for '{wallet_address}' - creating a new record")
+            
+            # Create a new wallet balance record
+            wallet_balance = WalletBalance(
+                wallet_address=wallet_address,
+                pixel_balance=total_pixels
+            )
+            
+            # Save to database
+            db.add(wallet_balance)
+            db.commit()
+            
+            print(f"Created new wallet balance for '{wallet_address}' with {total_pixels} pixels from {len(verified_transactions)} verified transactions")
+            
+            return {"pixel_balance": total_pixels}
+    
+    # Check if the wallet balance needs to be synced with verified transactions
+    if wallet_balance.pixel_balance != total_pixels:
+        print(f"Wallet balance ({wallet_balance.pixel_balance}) does not match verified transactions total ({total_pixels}) - updating")
+        old_balance = wallet_balance.pixel_balance
+        wallet_balance.pixel_balance = total_pixels
+        db.commit()
+        print(f"Updated wallet balance from {old_balance} to {total_pixels}")
     
     print(f"Found wallet balance for '{wallet_address}': {wallet_balance.pixel_balance}")
-    return {"pixel_balance": wallet_balance.pixel_balance} 
+    return {"pixel_balance": wallet_balance.pixel_balance}
+
+@router.post("/wallets/{wallet_address}/sync")
+async def sync_wallet_balance(
+    wallet_address: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Sync a wallet's balance with its verified transactions.
+    This is useful for cases where the background verification task
+    might have failed to update the wallet balance.
+    """
+    print(f"Syncing wallet balance for: '{wallet_address}'")
+    
+    # Get all verified transactions for this wallet
+    verified_transactions = db.query(Transaction).filter(
+        Transaction.wallet_address == wallet_address,
+        Transaction.verified == True
+    ).all()
+    
+    # Calculate total pixels from verified transactions
+    total_pixels = sum(tx.pixels_added for tx in verified_transactions) if verified_transactions else 0
+    print(f"Found {len(verified_transactions)} verified transactions with a total of {total_pixels} pixels")
+    
+    # Get or create the wallet balance record
+    wallet_balance = db.query(WalletBalance).filter(
+        WalletBalance.wallet_address == wallet_address
+    ).first()
+    
+    if not wallet_balance:
+        print(f"Creating new wallet balance for '{wallet_address}'")
+        wallet_balance = WalletBalance(
+            wallet_address=wallet_address,
+            pixel_balance=total_pixels
+        )
+        db.add(wallet_balance)
+        db.commit()
+        return {
+            "message": f"Created new wallet balance with {total_pixels} pixels from {len(verified_transactions)} verified transactions",
+            "pixel_balance": total_pixels,
+            "verified_transactions": len(verified_transactions)
+        }
+    
+    # Update the wallet balance
+    old_balance = wallet_balance.pixel_balance
+    wallet_balance.pixel_balance = total_pixels
+    db.commit()
+    
+    print(f"Updated wallet balance from {old_balance} to {total_pixels} pixels")
+    
+    return {
+        "message": f"Wallet balance synced from {old_balance} to {total_pixels} pixels",
+        "pixel_balance": total_pixels,
+        "verified_transactions": len(verified_transactions),
+        "balance_difference": total_pixels - old_balance
+    } 
